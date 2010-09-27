@@ -82,6 +82,7 @@ import threading
 import time
 import tokenize
 import tempfile
+import msgpack 
 
 from Cookie import SimpleCookie
 from tempfile import TemporaryFile
@@ -312,15 +313,15 @@ class Router(object):
         return None
 
     def match(self, uri):
-        ''' Match an URI and return a (target, urlargs) tuple '''
-        if uri in self.static:
+        ''' Match an URI and return a (target, urlargs) tuple '''  
+        if uri in self.static:      
             return self.static[uri], {}
         for combined, subroutes in self.dynamic:
             match = combined.match(uri)
             if not match: continue
             target, args_re = subroutes[match.lastindex - 1]
-            args = args_re.match(uri).groupdict() if args_re else {}
-            return target, args
+            args = args_re.match(uri).groupdict() if args_re else {}    
+            return target, args  
         return None, {}
 
     def build(self, _name, **args):
@@ -369,7 +370,7 @@ class Bottle(object):
     def __init__(self, catchall=True, autojson=True, config=None):
         """ Create a new bottle instance.
             You usually don't do that. Use `bottle.app.push()` instead.
-        """
+        """  
         self.routes = Router()
         self.mounts = {}
         self.error_handler = {}
@@ -378,7 +379,7 @@ class Bottle(object):
         self.serve = True
         self.castfilter = []
         if autojson and json_dumps:
-            self.add_filter(dict, dict2json)
+            self.add_filter(dict, dict2json) 
 
     def optimize(self, *a, **ka):
         depr("Bottle.optimize() is obsolete.")
@@ -414,7 +415,7 @@ class Bottle(object):
             Return (callback, param) tuple or raise HTTPError.
             method: HEAD falls back to GET. All methods fall back to ANY.
         """
-        path, method = path.strip().lstrip('/'), method.upper()
+        path, method = path.strip().lstrip('/'), method.upper() 
         callbacks, args = self.routes.match(path)
         if not callbacks:
             raise HTTPError(404, "Not found: " + path)
@@ -438,11 +439,10 @@ class Bottle(object):
         
     def rpcserver(self): 
         def wrapper(callback):
-            callroute =  yieldroutes(callback)    
-            routes = [yieldroutes(callback)]   
-            methods = ['GET']   
+            callroute =  yieldfuncroutes(callback)      
+            methods = ['POST']   
             argument = {}
-            for r in routes:
+            for r in callroute:
                 for m in methods:  
                     r, m = r.strip().lstrip('/'), m.strip().upper()
                     old = self.routes.get_route(r, **argument)
@@ -513,8 +513,13 @@ class Bottle(object):
         if not self.serve:
             return HTTPError(503, "Server stopped")
         try:
-            handler, args = self.match_url(url, method)
-            return handler(**args)
+            handler, args = self.match_url(url, method)    
+            msg =msgpack.unpackb(request.body.getvalue()) 
+            args = msg['args']
+            kw = msg['kw'] 
+            body = {}
+            body['r'] = handler(*args,**kw)        
+            return msgpack.packb(body)
         except HTTPResponse, e:
             return e
         except Exception, e:
@@ -995,7 +1000,7 @@ class AppStack(list):
     """ A stack implementation. """
 
     def __call__(self):
-        """ Return the current default app. """
+        """ Return the current default app. """   
         return self[-1]
 
     def push(self, value=None):
@@ -1165,14 +1170,18 @@ def yieldroutes(func):
       c(x, y=5)   -> '/c/:x' and '/c/:x/:y'
       d(x=5, y=6) -> '/d' and '/d/:x' and '/d/:x/:y'
     """
-    path = func.__name__.replace('__','/').lstrip('/')
+    path = func.__name__.replace('__','/').lstrip('/')  
     spec = inspect.getargspec(func)
     argc = len(spec[0]) - len(spec[3] or [])
-    path += ('/:%s' * argc) % tuple(spec[0][:argc])
+    path += ('/:%s' * argc) % tuple(spec[0][:argc]) 
     yield path
     for arg in spec[0][argc:]:
-        path += '/:%s' % arg
-        yield path
+        path += '/:%s' % arg 
+        yield path  
+        
+def yieldfuncroutes(func): 
+    path = func.__name__.replace('__','/').lstrip('/') 
+    yield path  
 
 def path_shift(script_name, path_info, shift=1):
     ''' Shift path fragments from PATH_INFO to SCRIPT_NAME and vice versa.
@@ -1237,7 +1246,7 @@ delete = functools.wraps(Bottle.delete)(lambda *a, **ka: app().delete(*a, **ka))
 error  = functools.wraps(Bottle.error)(lambda *a, **ka: app().error(*a, **ka))
 url    = functools.wraps(Bottle.get_url)(lambda *a, **ka: app().get_url(*a, **ka))
 mount  = functools.wraps(Bottle.mount)(lambda *a, **ka: app().mount(*a, **ka))    
-rpcserver = functools.wraps(Bottle.rpcserver)(lambda  _: app().rpcserver())  
+rpcserver = functools.wraps(Bottle.rpcserver)(lambda *a: app().rpcserver())  
 
 def default():
     depr("The default() decorator is deprecated. Use @error(404) instead.")
@@ -1431,11 +1440,11 @@ server_names = {
 
 def run(app=None, server=TornadoServer, host='127.0.0.1', port=8080,
         interval=1, reloader=False, quiet=False, **kargs):
-    """ Runs bottle as a web server. """
+    """ Runs bottle as a web server. """  
     app = app if app else default_app()
     # Instantiate server, if it is a class instead of an instance
-    if isinstance(server, type):
-        server = server(host=host, port=port, **kargs)
+    if isinstance(server, type):  
+        server = server(host=host, port=port, **kargs) 
     if not isinstance(server, ServerAdapter):
         raise RuntimeError("Server must be a subclass of WSGIAdapter")
     server.quiet = server.quiet or quiet
@@ -1443,8 +1452,8 @@ def run(app=None, server=TornadoServer, host='127.0.0.1', port=8080,
         print "Bottle server starting up (using %s)..." % repr(server)
         print "Listening on http://%s:%d/" % (server.host, server.port)
         print "Use Ctrl-C to quit."
-        print
-    try:
+        print 
+    try:  
         if reloader:
             interval = min(interval, 1)
             if os.environ.get('BOTTLE_CHILD'):
@@ -1978,4 +1987,27 @@ local = threading.local()
 # Initialize app stack (create first empty Bottle app)
 # BC: 0.6.4 and needed for run()
 app = default_app = AppStack()
-app.push()
+app.push()      
+
+
+import urllib2
+
+def rpcclient(func ,host ='http://127.0.0.1:8080'):
+    def fn(*args,**kw):
+        inputdict = {}
+        inputdict['args'] = args
+        inputdict['kw'] = kw       
+        rpcinput = msgpack.packb(inputdict) 
+        posturl = host+'/'+func 
+        headers= {'content-type':'application/octet-stream'} 
+        
+        req = urllib2.Request(url=posturl,
+                              data=rpcinput,
+                              headers = headers)  
+        f = urllib2.urlopen(req)
+        output = f.read()
+        rpcoutput = msgpack.unpackb(output)
+        return rpcoutput['r']   
+    return fn
+        
+
